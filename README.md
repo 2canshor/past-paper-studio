@@ -12,11 +12,13 @@
 
 1. 在 iPad Safari 開啟網址，加入 Home Screen。
 2. 從 Home Screen 開啟，再 import 私人 `.ppsbank` 一次。
-3. 多選 Topics，按「開始」。
+3. 在「選擇練習主題」勾選 Topics，按「開始練習」。
 4. MC 點選答案後按「下一題」；SQ 按「查看答案」再 self-mark。
 5. 隨時離開，重新開啟恢復原位。題池清空後可備份至 Files。
 
-Apple Pencil 或 Mac 滑鼠可畫；手指不畫。雙指移動及縮放；Mac trackpad 滾動可移動，Ctrl＋滾動可縮放。細字可從「筆粗」調整。舊 attempts 在「更多 → 之前作答」。
+Apple Pencil 或 Mac 滑鼠可畫；手指不畫。雙指移動及縮放；Mac trackpad 滾動可移動，Ctrl＋滾動可縮放。細字可從「筆粗」調整。舊 attempts 在「更多選項 → 查看之前作答」。
+
+主題頁的「管理資料」分開提供「匯入題庫」「匯出備份」「還原備份」。還原會先顯示資料取代說明，按「取消」不會更改任何進度；題庫檔案不會誤觸還原流程。
 
 Browser storage 可能被使用者清除或被系統回收；程式會請求 persistent storage，但仍需保留 `.ppsbackup`。按備份後，系統分享或下載畫面可能仍需要選擇目的地。
 

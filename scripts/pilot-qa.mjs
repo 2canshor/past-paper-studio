@@ -16,11 +16,11 @@ async function open(topic) {
   page.on("pageerror", (e) => errors.push(e.message));
   await page.goto(process.env.PRACTICE_QA_URL || "http://127.0.0.1:5173/");
   await page
-    .getByLabel("匯入題庫或備份")
+    .getByLabel("選擇題庫檔案")
     .setInputFiles("../Working/Practice/pilot/Pilot.ppsbank");
   await page.getByLabel(topic, { exact: true }).check();
   await page.screenshot({ path: `${out}/topics.png`, fullPage: true });
-  await page.getByRole("button", { name: "開始", exact: true }).click();
+  await page.getByRole("button", { name: "開始練習", exact: true }).click();
   await page.getByLabel("題目", { exact: true }).waitFor();
   await page.getByRole("status").filter({ hasText: "已儲存" }).waitFor();
   return { context, page, errors };

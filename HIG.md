@@ -15,6 +15,17 @@
 
 ## 必要自訂部分
 
+### 資料操作（2026-09-05 修訂）
+
+- 主題頁入口為「管理資料」，練習頁為「更多選項」。
+- 用原生 HTML `popover=auto` 提供點外面關閉、Esc 關閉及 keyboard focus 行為；取代不會自動收起的 `details` 選單。
+- 按「目前題目」「題庫」「備份」分組，各動作獨立；「匯入題庫」與「還原備份」有分開的 file input 及格式驗證。
+- 還原採用原生 HTML `dialog`；標明會取代本機題庫、草稿及進度，不會合併；預設 focus 在取消。
+- 備份準備完成只保留一個主要儲存／分享或下載動作；不用兩個近似下載按鈕競爭。
+- 選單說明草稿及進度自動保存在本機；匯出備份不是日常保存的必需步驟。
+
+依據：[Menus](https://developer.apple.com/design/human-interface-guidelines/menus)、[Writing](https://developer.apple.com/design/human-interface-guidelines/writing)、[Alerts](https://developer.apple.com/design/human-interface-guidelines/alerts)。
+
 - Canvas 2D／Pointer Events 書寫、雙指移動縮放、筆跡 eraser／lasso。
 - MC 2×2 選项排列，A–D 順序及文字固定；不複製 Kahoot 商標、四色皮膚或音效。
 - SQ 橫線答案区及空白思考区；參考答案在題目位置展開，草稿保持可見。

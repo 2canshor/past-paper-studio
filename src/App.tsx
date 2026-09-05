@@ -50,11 +50,44 @@ export default function App() {
     [promptUrls, setPromptUrls] = useState<string[]>([]),
     [history, setHistory] = useState(false),
     [referenceOpen, setReferenceOpen] = useState(false),
+    [menuOpen, setMenuOpen] = useState(false),
+    [shareFailed, setShareFailed] = useState(false),
+    [menuPosition, setMenuPosition] = useState({
+      top: 60,
+      right: 16,
+      maxHeight: 600,
+    }),
+    [pendingRestore, setPendingRestore] = useState<{
+      data: Awaited<ReturnType<typeof unpack>>;
+      revision: number;
+      name: string;
+    } | null>(null),
     [backup, setBackup] = useState<{ blob: Blob; name: string } | null>(null);
   const tail = useRef<Promise<void>>(Promise.resolve()),
     rev = useRef(0),
     failed = useRef(false),
-    file = useRef<HTMLInputElement>(null);
+    bankFile = useRef<HTMLInputElement>(null),
+    backupFile = useRef<HTMLInputElement>(null),
+    actions = useRef<HTMLDivElement>(null),
+    restoreDialog = useRef<HTMLDialogElement>(null),
+    menuButton = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    const dialog = restoreDialog.current;
+    if (pendingRestore && dialog && !dialog.open) dialog.showModal();
+    if (!pendingRestore && dialog?.open) dialog.close();
+  }, [pendingRestore]);
+  function closeMenu() {
+    actions.current?.hidePopover();
+  }
+  useEffect(() => {
+    const dismiss = () => actions.current?.hidePopover();
+    window.addEventListener("resize", dismiss);
+    return () => window.removeEventListener("resize", dismiss);
+  }, []);
+  function chooseFile(kind: "bank" | "backup") {
+    closeMenu();
+    (kind === "bank" ? bankFile : backupFile).current?.click();
+  }
   const show = (w: Workspace) => {
     ref.current = w;
     setWork(w);
@@ -180,7 +213,7 @@ export default function App() {
       setError((e as Error).message);
     }
   }
-  async function importFile(f: File) {
+  async function importFile(f: File, intent: "bank" | "backup") {
     if (lock.current) return;
     lock.current = true;
     setBusy(true);
@@ -188,6 +221,10 @@ export default function App() {
     try {
       await tail.current;
       const data = await unpack(f);
+      if (intent === "bank" && data.format !== "ppsbank")
+        throw Error("呢個唔係題庫檔案。要還原進度，請選「還原備份」。");
+      if (intent === "backup" && data.format !== "ppsbackup")
+        throw Error("呢個唔係備份檔案。要加入題目，請選「匯入題庫」。");
       if (data.format === "ppsbank") {
         const imported = data.banks[0];
         const key = await db.installBank(imported, data.assets);
@@ -206,35 +243,56 @@ export default function App() {
         }
         setStatus("題庫已匯入");
       } else if (data.format === "ppsbackup" && data.workspace) {
-        if (!confirm("還原會取代本機現有草稿及進度。已保存備份後才繼續。"))
-          return;
-        const w = await db.restore(
-          { ...data, workspace: data.workspace },
-          rev.current,
-        );
-        rev.current = w.revision;
-        show(w);
-        setBank(
-          data.banks.find(
-            (b) =>
-              bankKey(b) ===
-              (w.session?.phase === "active" ? w.session.bankKey : w.bankKey),
-          ) || null,
-        );
-        setBanks(data.banks);
-        setTopics(w.selectedTopics);
-        setStatus("已還原");
+        setPendingRestore({ data, revision: rev.current, name: f.name });
       } else throw Error("呢個係供 review 使用嘅匯出包，唔係題庫或備份。");
     } catch (e) {
       setError((e as Error | null)?.message || "匯入失敗；原有資料未被取代。");
     } finally {
       lock.current = false;
       setBusy(false);
-      if (file.current) file.current.value = "";
+      if (bankFile.current) bankFile.current.value = "";
+      if (backupFile.current) backupFile.current.value = "";
+    }
+  }
+  async function confirmRestore() {
+    if (lock.current || !pendingRestore?.data.workspace) return;
+    lock.current = true;
+    setBusy(true);
+    setError("");
+    const { data, revision } = pendingRestore;
+    try {
+      const w = await db.restore(
+        { ...data, workspace: data.workspace! },
+        revision,
+      );
+      rev.current = w.revision;
+      show(w);
+      tail.current = Promise.resolve();
+      failed.current = false;
+      setBank(
+        data.banks.find(
+          (b) =>
+            bankKey(b) ===
+            (w.session?.phase === "active" ? w.session.bankKey : w.bankKey),
+        ) || null,
+      );
+      setBanks(data.banks);
+      setTopics(w.selectedTopics);
+      setStatus("已還原");
+      setPendingRestore(null);
+    } catch (e) {
+      setPendingRestore(null);
+      setError((e as Error).message);
+    } finally {
+      lock.current = false;
+      setBusy(false);
     }
   }
   async function makeBackup(review = false) {
     if (lock.current) return;
+    closeMenu();
+    setBackup(null);
+    setShareFailed(false);
     lock.current = true;
     setBusy(true);
     setError("");
@@ -274,13 +332,15 @@ export default function App() {
   async function saveBackup() {
     if (!backup) return;
     const f = new File([backup.blob], backup.name, { type: "application/zip" });
-    if (navigator.canShare?.({ files: [f] })) {
+    if (!shareFailed && navigator.canShare?.({ files: [f] })) {
       try {
         await navigator.share({ files: [f] });
         setBackup(null);
       } catch (e) {
-        if ((e as Error).name !== "AbortError")
+        if ((e as Error).name !== "AbortError") {
+          setShareFailed(true);
           setError("未能分享，請選擇下載備份。");
+        }
       }
     } else {
       download(backup.blob, backup.name);
@@ -323,6 +383,15 @@ export default function App() {
         (a) => a.questionId === q.id && a.id !== attempt?.id,
       )
     : [];
+  const reviewExport = backup?.name.endsWith(".ppsreview");
+  const canSharePrepared =
+    !shareFailed &&
+    !!backup &&
+    !!navigator.canShare?.({
+      files: [
+        new File([backup.blob], backup.name, { type: "application/zip" }),
+      ],
+    });
   return (
     <>
       <header className="app-bar">
@@ -331,47 +400,165 @@ export default function App() {
         <span className="save-status" role="status">
           {status}
         </span>
-        <details className="more">
-          <summary>更多</summary>
-          <div className="menu">
-            <button onClick={() => file.current?.click()} disabled={busy}>
-              匯入題庫／還原備份
-            </button>
-            <button onClick={() => makeBackup()} disabled={busy}>
-              製作備份
-            </button>
-            {inPractice && (
-              <>
-                <button
-                  onClick={() => setHistory((v) => !v)}
-                  disabled={!archived.length}
-                >
-                  之前作答
-                </button>
-                <button onClick={() => makeBackup(true)} disabled={busy}>
-                  匯出此題作 review
-                </button>
-              </>
-            )}
-            {work.lastGrade && (
-              <button disabled={busy} onClick={() => act(engine.undoGrade)}>
-                撤銷上一個評分
+        <button
+          ref={menuButton}
+          className="data-button"
+          popoverTarget="practice-actions"
+          aria-expanded={menuOpen}
+          aria-controls="practice-actions"
+          onClick={(e) => {
+            const r = e.currentTarget.getBoundingClientRect();
+            const width = Math.min(
+              20 *
+                parseFloat(getComputedStyle(document.documentElement).fontSize),
+              window.innerWidth - 32,
+            );
+            const top = Math.min(
+              r.bottom + 8,
+              Math.max(16, window.innerHeight - 160),
+            );
+            setMenuPosition({
+              top,
+              right: Math.max(
+                16,
+                Math.min(
+                  window.innerWidth - r.right,
+                  window.innerWidth - width - 16,
+                ),
+              ),
+              maxHeight: window.innerHeight - top - 16,
+            });
+          }}
+        >
+          {inPractice ? "更多選項" : "管理資料"}
+          <span aria-hidden="true"> ⋯</span>
+        </button>
+        <div
+          id="practice-actions"
+          className="actions-popover"
+          popover="auto"
+          ref={actions}
+          style={menuPosition}
+          onToggle={(e) => {
+            const opened = (e.nativeEvent as ToggleEvent).newState === "open";
+            setMenuOpen(opened);
+            if (opened)
+              actions.current
+                ?.querySelector<HTMLButtonElement>("button:not(:disabled)")
+                ?.focus();
+            else if (
+              document.activeElement === document.body ||
+              actions.current?.contains(document.activeElement)
+            )
+              menuButton.current?.focus();
+          }}
+        >
+          {inPractice && (
+            <div className="action-group" role="group" aria-label="目前題目">
+              <p className="group-title">目前題目</p>
+              <button
+                onClick={() => {
+                  closeMenu();
+                  setHistory((v) => !v);
+                }}
+                disabled={!archived.length}
+              >
+                {history ? "隱藏之前作答" : "查看之前作答"}
               </button>
-            )}
+              <button onClick={() => makeBackup(true)} disabled={busy}>
+                匯出這題與草稿…
+              </button>
+              {work.lastGrade && (
+                <button
+                  disabled={busy}
+                  onClick={() => {
+                    closeMenu();
+                    act(engine.undoGrade);
+                  }}
+                >
+                  撤銷上一個評分
+                </button>
+              )}
+            </div>
+          )}
+          <div className="action-group" role="group" aria-label="題庫">
+            <p className="group-title">題庫</p>
+            <button
+              autoFocus
+              onClick={() => chooseFile("bank")}
+              disabled={busy}
+            >
+              匯入題庫…
+            </button>
           </div>
-        </details>
+          <div className="action-group" role="group" aria-label="備份">
+            <p className="group-title">備份</p>
+            <button
+              onClick={() => makeBackup()}
+              disabled={busy || !banks.length}
+            >
+              匯出備份…
+            </button>
+            <button onClick={() => chooseFile("backup")} disabled={busy}>
+              還原備份…
+            </button>
+          </div>
+          <p className="menu-note">草稿及進度會自動儲存在這部裝置。</p>
+        </div>
         <input
-          ref={file}
+          ref={bankFile}
           type="file"
-          accept=".ppsbank,.ppsbackup,application/zip"
-          aria-label="匯入題庫或備份"
+          accept=".ppsbank,application/zip"
+          aria-label="選擇題庫檔案"
+          tabIndex={-1}
           className="file-input"
           onChange={(e) => {
             const f = e.target.files?.[0];
-            if (f) importFile(f);
+            if (f) importFile(f, "bank");
+          }}
+        />
+        <input
+          ref={backupFile}
+          type="file"
+          accept=".ppsbackup,application/zip"
+          aria-label="選擇備份檔案"
+          tabIndex={-1}
+          className="file-input"
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) importFile(f, "backup");
           }}
         />
       </header>
+      <dialog
+        ref={restoreDialog}
+        aria-labelledby="restore-title"
+        aria-describedby="restore-description"
+        className="restore-dialog"
+        onCancel={() => setPendingRestore(null)}
+      >
+        <h2 id="restore-title">還原這份備份？</h2>
+        <p id="restore-description">
+          這部裝置目前的題庫、草稿及練習進度，會被備份中的內容取代。此操作不會合併兩份資料。
+        </p>
+        <p className="restore-filename">{pendingRestore?.name}</p>
+        <div className="dialog-actions">
+          <button
+            autoFocus
+            disabled={busy}
+            onClick={() => setPendingRestore(null)}
+          >
+            取消
+          </button>
+          <button
+            className="destructive"
+            disabled={busy}
+            onClick={confirmRestore}
+          >
+            還原備份
+          </button>
+        </div>
+      </dialog>
       {error && (
         <div className="error" role="alert">
           {error}
@@ -380,12 +567,13 @@ export default function App() {
       )}
       {backup && (
         <div className="backup-bar" role="status">
-          <span>備份已準備好</span>
+          <span>{reviewExport ? "題目與草稿已準備好" : "備份已準備好"}</span>
           <button className="primary" onClick={saveBackup}>
-            儲存到 Files
-          </button>
-          <button onClick={() => download(backup.blob, backup.name)}>
-            下載檔案
+            {canSharePrepared
+              ? "儲存或分享…"
+              : reviewExport
+                ? "下載題目與草稿"
+                : "下載備份"}
           </button>
           <button onClick={() => setBackup(null)}>稍後</button>
         </div>
@@ -394,24 +582,31 @@ export default function App() {
         <main className="topics-page">
           {!bank ? (
             <>
-              <h1>開始練習</h1>
-              <p>匯入已準備好嘅題庫，之後就可以離線使用。</p>
+              <h1>加入第一份題庫</h1>
+              <p>選擇已準備好的題庫檔案。匯入一次後，就可以離線練習。</p>
               <button
                 className="primary"
                 disabled={busy}
-                onClick={() => file.current?.click()}
+                onClick={() => chooseFile("bank")}
               >
                 {busy ? "匯入中…" : "匯入題庫"}
+              </button>
+              <button
+                className="text-button"
+                disabled={busy}
+                onClick={() => chooseFile("backup")}
+              >
+                已有備份？還原練習進度
               </button>
             </>
           ) : (
             <>
-              <h1>Topics</h1>
+              <h1>選擇練習主題</h1>
               {session?.phase === "complete" && (
                 <div className="complete">
                   <p>呢一組已經全部完成。</p>
                   <button onClick={() => makeBackup()} disabled={busy}>
-                    備份到 Files
+                    匯出備份…
                   </button>
                 </div>
               )}
@@ -443,7 +638,9 @@ export default function App() {
                   </select>
                 </label>
               )}
-              <p className="secondary">選擇今次想練嘅 Topics。</p>
+              <p className="secondary">
+                可選多個主題。做完這一組後，再選下一組。
+              </p>
               {[...new Set(bank.topics.map((t) => t.subject))].map(
                 (subject) => (
                   <fieldset key={subject}>
@@ -479,7 +676,7 @@ export default function App() {
                   disabled={!topics.length || busy || failed.current}
                   onClick={() => act((w) => engine.start(w, bank, topics))}
                 >
-                  開始
+                  開始練習
                 </button>
               </div>
             </>

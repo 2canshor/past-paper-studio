@@ -59,9 +59,9 @@ function fixture(kind: "mc" | "sq", count = 1) {
 }
 async function setup(page: Page, kind: "mc" | "sq", count = 1, url = "/") {
   await page.goto(url);
-  await page.getByLabel("匯入題庫或備份").setInputFiles(fixture(kind, count));
+  await page.getByLabel("選擇題庫檔案").setInputFiles(fixture(kind, count));
   await page.getByLabel("測試 Topic").check();
-  await page.getByRole("button", { name: "開始", exact: true }).click();
+  await page.getByRole("button", { name: "開始練習", exact: true }).click();
   await expect(page.getByLabel("思考空間", { exact: true })).toBeVisible();
 }
 async function workspace(page: Page) {
@@ -98,7 +98,7 @@ test("MC wrong repeats with fresh attempt; correct exhausts and survives reopen"
   await expect(page.getByText("呢一組已經全部完成。")).toBeVisible();
   await page.reload();
   await expect(
-    page.getByRole("heading", { name: "Topics", exact: true }),
+    page.getByRole("heading", { name: "選擇練習主題", exact: true }),
   ).toBeVisible();
   await expect(page.getByLabel("測試 Topic")).toBeChecked();
   expect((await workspace(page)).session.phase).toBe("complete");
@@ -211,7 +211,7 @@ test("offline shell reload retains active question and local assets", async ({
 test("corrupt import leaves existing progress untouched", async ({ page }) => {
   await setup(page, "mc");
   const before = await workspace(page);
-  await page.getByLabel("匯入題庫或備份").setInputFiles({
+  await page.getByLabel("選擇題庫檔案").setInputFiles({
     name: "bad.ppsbank",
     mimeType: "application/zip",
     buffer: Buffer.from("not a zip"),
@@ -287,19 +287,39 @@ test("erasing is undoable and touch-only input does not draw", async ({
 test("backup restores the actual current attempt and score", async ({
   page,
 }) => {
+  await page.addInitScript(() =>
+    Object.defineProperty(navigator, "canShare", {
+      value: () => false,
+      configurable: true,
+    }),
+  );
   await setup(page, "mc");
   await page.getByRole("button", { name: "A 選項 A", exact: true }).click();
   const before = await workspace(page);
-  await page.getByText("更多", { exact: true }).click();
-  await page.getByRole("button", { name: "製作備份", exact: true }).click();
+  await page.getByRole("button", { name: "更多選項", exact: true }).click();
+  await page.getByRole("button", { name: "匯出備份…", exact: true }).click();
   const downloadPromise = page.waitForEvent("download");
-  await page.getByRole("button", { name: "下載檔案", exact: true }).click();
+  await page.getByRole("button", { name: "下載備份", exact: true }).click();
   const downloaded = await downloadPromise;
   const path = await downloaded.path();
-  await page.getByLabel("匯入題庫或備份").setInputFiles(fixture("sq")); // bank update cannot replace active session
+  await page.getByLabel("選擇題庫檔案").setInputFiles(fixture("sq")); // bank update cannot replace active session
   expect((await workspace(page)).session).toEqual(before.session);
-  page.once("dialog", (d) => d.accept());
-  await page.getByLabel("匯入題庫或備份").setInputFiles(path!);
+  await page.getByLabel("選擇備份檔案").setInputFiles(path!);
+  const confirmation = page.getByRole("dialog");
+  await expect(
+    confirmation.getByText(
+      "這部裝置目前的題庫、草稿及練習進度，會被備份中的內容取代。此操作不會合併兩份資料。",
+    ),
+  ).toBeVisible();
+  expect((await workspace(page)).session).toEqual(before.session);
+  await confirmation.getByRole("button", { name: "取消", exact: true }).click();
+  await expect(confirmation).not.toBeVisible();
+  expect((await workspace(page)).session).toEqual(before.session);
+  await page.getByLabel("選擇備份檔案").setInputFiles(path!);
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "還原備份", exact: true })
+    .click();
   await expect(
     page.getByRole("status").filter({ hasText: "已還原" }),
   ).toBeVisible();
@@ -308,13 +328,131 @@ test("backup restores the actual current attempt and score", async ({
   expect(restored.attempts).toEqual(before.attempts);
 });
 
-test('lasso moves ink and Undo restores its position',async({page})=>{
- await setup(page,'sq');const canvas=page.getByLabel('思考空間',{exact:true}),b=(await canvas.boundingBox())!;
- async function line(points:number[][]){await page.mouse.move(b.x+points[0][0],b.y+points[0][1]);await page.mouse.down();for(const p of points.slice(1))await page.mouse.move(b.x+p[0],b.y+p[1],{steps:10});await page.mouse.up();}
- await line([[80,100],[140,100]]);
- await expect.poll(async()=>{const w=await workspace(page);return w.attempts[w.session.attemptId].thinking.strokes.length;}).toBe(1);
- const old=await workspace(page);const first=old.attempts[old.session.attemptId].thinking.strokes[0].points[0][0];
- await page.getByRole('button',{name:'選取',exact:true}).click();await line([[50,70],[170,70],[170,130],[50,130],[50,70]]);await line([[100,100],[180,170]]);
- await expect.poll(async()=>{const w=await workspace(page);return w.attempts[w.session.attemptId].thinking.strokes[0].points[0][0];}).toBeGreaterThan(first+50);
- await page.getByRole('button',{name:'Undo',exact:true}).click();await expect.poll(async()=>{const w=await workspace(page);return w.attempts[w.session.attemptId].thinking.strokes[0].points[0][0];}).toBe(first);
+test("data actions are distinct, grouped, dismissible and stay inside the viewport", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page.getByLabel("選擇題庫檔案").setInputFiles(fixture("mc"));
+  const trigger = page.getByRole("button", { name: "管理資料", exact: true });
+  await trigger.click();
+  const popover = page.locator("#practice-actions");
+  await expect(popover).toBeVisible();
+  await expect(
+    popover
+      .getByRole("group", { name: "題庫", exact: true })
+      .getByRole("button", { name: "匯入題庫…", exact: true }),
+  ).toBeVisible();
+  await expect(
+    popover
+      .getByRole("group", { name: "備份", exact: true })
+      .getByRole("button", { name: "匯出備份…", exact: true }),
+  ).toBeVisible();
+  await expect(
+    popover.getByRole("button", { name: "還原備份…", exact: true }),
+  ).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(popover).not.toBeVisible();
+  await expect(trigger).toBeFocused();
+  await trigger.click();
+  await page
+    .getByRole("heading", { name: "選擇練習主題", exact: true })
+    .click();
+  await expect(popover).not.toBeVisible();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.evaluate(() => (document.documentElement.style.fontSize = "34px"));
+  await trigger.click();
+  const bounds = (await popover.boundingBox())!;
+  expect(bounds.x).toBeGreaterThanOrEqual(0);
+  expect(bounds.x + bounds.width).toBeLessThanOrEqual(390);
+  const buttons = await popover.getByRole("button").all();
+  for (const b of buttons) {
+    const box = await b.boundingBox();
+    expect(box!.height).toBeGreaterThanOrEqual(44);
+  }
+});
+
+test("failed system sharing offers one download fallback", async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, "canShare", {
+      value: () => true,
+      configurable: true,
+    });
+    Object.defineProperty(navigator, "share", {
+      value: async () => {
+        throw new Error("Sharing unavailable");
+      },
+      configurable: true,
+    });
+  });
+  await setup(page, "mc");
+  await page.getByRole("button", { name: "更多選項", exact: true }).click();
+  await page.getByRole("button", { name: "匯出備份…", exact: true }).click();
+  await page.getByRole("button", { name: "儲存或分享…", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "下載備份", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "儲存或分享…", exact: true }),
+  ).toHaveCount(0);
+});
+
+test("choosing a bank through restore cannot silently import it", async ({
+  page,
+}) => {
+  await setup(page, "mc");
+  const before = await workspace(page);
+  await page.getByLabel("選擇備份檔案").setInputFiles(fixture("sq"));
+  await expect(page.getByRole("alert")).toContainText("呢個唔係備份檔案");
+  expect((await workspace(page)).session).toEqual(before.session);
+});
+
+test("lasso moves ink and Undo restores its position", async ({ page }) => {
+  await setup(page, "sq");
+  const canvas = page.getByLabel("思考空間", { exact: true }),
+    b = (await canvas.boundingBox())!;
+  async function line(points: number[][]) {
+    await page.mouse.move(b.x + points[0][0], b.y + points[0][1]);
+    await page.mouse.down();
+    for (const p of points.slice(1))
+      await page.mouse.move(b.x + p[0], b.y + p[1], { steps: 10 });
+    await page.mouse.up();
+  }
+  await line([
+    [80, 100],
+    [140, 100],
+  ]);
+  await expect
+    .poll(async () => {
+      const w = await workspace(page);
+      return w.attempts[w.session.attemptId].thinking.strokes.length;
+    })
+    .toBe(1);
+  const old = await workspace(page);
+  const first =
+    old.attempts[old.session.attemptId].thinking.strokes[0].points[0][0];
+  await page.getByRole("button", { name: "選取", exact: true }).click();
+  await line([
+    [50, 70],
+    [170, 70],
+    [170, 130],
+    [50, 130],
+    [50, 70],
+  ]);
+  await line([
+    [100, 100],
+    [180, 170],
+  ]);
+  await expect
+    .poll(async () => {
+      const w = await workspace(page);
+      return w.attempts[w.session.attemptId].thinking.strokes[0].points[0][0];
+    })
+    .toBeGreaterThan(first + 50);
+  await page.getByRole("button", { name: "Undo", exact: true }).click();
+  await expect
+    .poll(async () => {
+      const w = await workspace(page);
+      return w.attempts[w.session.attemptId].thinking.strokes[0].points[0][0];
+    })
+    .toBe(first);
 });
