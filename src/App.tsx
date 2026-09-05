@@ -508,6 +508,7 @@ export default function App() {
         <input
           ref={bankFile}
           type="file"
+          hidden
           accept=".ppsbank,application/zip"
           aria-label="選擇題庫檔案"
           tabIndex={-1}
@@ -520,6 +521,7 @@ export default function App() {
         <input
           ref={backupFile}
           type="file"
+          hidden
           accept=".ppsbackup,application/zip"
           aria-label="選擇備份檔案"
           tabIndex={-1}
