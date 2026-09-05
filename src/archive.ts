@@ -173,6 +173,7 @@ export function validateWorkspace(w: Workspace, banks: Bank[]) {
         Number.isInteger(s.seed),
       "備份題池狀態不正確。",
     );
+    assert(new Set(s.remaining).size === s.remaining.length && new Set(s.queue).size === s.queue.length && s.recent.every(id=>s.allIds.includes(id)), '備份題池有重複或未知題目。');
     if (s.phase === "active")
       assert(
         s.currentId &&
@@ -185,6 +186,11 @@ export function validateWorkspace(w: Workspace, banks: Bank[]) {
         s.remaining.length === 0 && !s.currentId && !s.attemptId,
         "已完成題池狀態不正確。",
       );
+  }
+  if(w.lastGrade){
+    const g=w.lastGrade;
+    assert(g.before && g.before.id===g.attemptId && g.session?.attemptId===g.attemptId && g.session.currentId===g.before.questionId && by.has(g.before.bankKey), '撤銷紀錄與題目不匹配。');
+    validateWorkspace({...w,session:g.session,attempts:{...w.attempts,[g.attemptId]:g.before},lastGrade:null},banks);
   }
 }
 export async function unpack(file: File) {

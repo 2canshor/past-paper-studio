@@ -171,13 +171,12 @@ export function undoGrade(work: Workspace) {
   const current = w.session?.attemptId;
   if (current && current !== last.attemptId) {
     const a = w.attempts[current];
-    if (
+    const hasWork =
       a.thinking.strokes.length ||
       a.answer.strokes.length ||
-      a.question.strokes.length
-    )
-      throw Error("下一題已有草稿，請先保留目前作答。");
-    delete w.attempts[current];
+      a.question.strokes.length;
+    // Keep a started next attempt in history when undoing the previous grade.
+    if (!hasWork) delete w.attempts[current];
   }
   w.session = last.session;
   w.attempts[last.attemptId] = last.before;

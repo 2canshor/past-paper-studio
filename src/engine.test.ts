@@ -11,6 +11,7 @@ import {
 } from "./engine";
 import { bank } from "../tests/bank-fixture";
 describe("practice lifecycle", () => {
+  it('undo preserves a draft already started on the next question',()=>{let w=start(emptyWorkspace(),bank,['b'],4);const previous=w.session!.attemptId!;w=nextMC(selectMC(w,bank,'B'),bank);const next=w.session!.attemptId!;w.attempts[next].thinking.strokes=[{id:'draft',points:[[5,5,.5]],width:1,color:'#000000',at:1}];w=undoGrade(w);expect(w.session!.attemptId).toBe(previous);expect(w.attempts[next].thinking.strokes).toHaveLength(1);});
   it("freezes only selected topics", () => {
     const w = start(emptyWorkspace(), bank, ["b"], 42);
     expect(w.session!.allIds.sort()).toEqual(["mc2", "mc3"]);
