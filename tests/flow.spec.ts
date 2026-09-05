@@ -307,3 +307,14 @@ test("backup restores the actual current attempt and score", async ({
   expect(restored.session).toEqual(before.session);
   expect(restored.attempts).toEqual(before.attempts);
 });
+
+test('lasso moves ink and Undo restores its position',async({page})=>{
+ await setup(page,'sq');const canvas=page.getByLabel('思考空間',{exact:true}),b=(await canvas.boundingBox())!;
+ async function line(points:number[][]){await page.mouse.move(b.x+points[0][0],b.y+points[0][1]);await page.mouse.down();for(const p of points.slice(1))await page.mouse.move(b.x+p[0],b.y+p[1],{steps:10});await page.mouse.up();}
+ await line([[80,100],[140,100]]);
+ await expect.poll(async()=>{const w=await workspace(page);return w.attempts[w.session.attemptId].thinking.strokes.length;}).toBe(1);
+ const old=await workspace(page);const first=old.attempts[old.session.attemptId].thinking.strokes[0].points[0][0];
+ await page.getByRole('button',{name:'選取',exact:true}).click();await line([[50,70],[170,70],[170,130],[50,130],[50,70]]);await line([[100,100],[180,170]]);
+ await expect.poll(async()=>{const w=await workspace(page);return w.attempts[w.session.attemptId].thinking.strokes[0].points[0][0];}).toBeGreaterThan(first+50);
+ await page.getByRole('button',{name:'Undo',exact:true}).click();await expect.poll(async()=>{const w=await workspace(page);return w.attempts[w.session.attemptId].thinking.strokes[0].points[0][0];}).toBe(first);
+});

@@ -68,7 +68,6 @@ export function InkCanvas({
     checkpoint = useRef(0);
   const [zoom, setZoom] = useState(ink.view.scale);
   const before = useRef<Stroke[]>([]);
-  live.current = ink;
   const paint = () => {
     if (frame.current) return;
     frame.current = requestAnimationFrame(() => {
@@ -144,6 +143,11 @@ export function InkCanvas({
     setZoom(next.view.scale);
     paint();
   };
+  useEffect(() => {
+    live.current = ink;
+    setZoom(ink.view.scale);
+    paint();
+  }, [ink]);
   useEffect(() => {
     const initial = live.current;
     if (
