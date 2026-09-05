@@ -103,6 +103,13 @@ test("MC wrong repeats with fresh attempt; correct exhausts and survives reopen"
   await expect(page.getByLabel("測試 Topic")).toBeChecked();
   expect((await workspace(page)).session.phase).toBe("complete");
 });
+
+test('installing an update bypasses stale HTTP-cached HTML',async({page})=>{
+ let old=true;
+ const server=createServer(async(req,res)=>{const pathname=new URL(req.url!,'http://localhost').pathname;const path=pathname==='/'?'index.html':pathname.slice(1);try{res.setHeader('Cache-Control','public, max-age=3600');res.setHeader('Content-Type',path.endsWith('.js')?'text/javascript':path.endsWith('.css')?'text/css':path.endsWith('.webmanifest')?'application/manifest+json':'text/html');res.end(old&&path==='index.html'?'<title>Old version</title>Old page':await readFile('dist/'+path));}catch{res.statusCode=404;res.end();}});
+ await new Promise<void>(r=>server.listen(0,'127.0.0.1',r));const origin='http://127.0.0.1:'+(server.address() as {port:number}).port;
+ try{await page.goto(origin+'/index.html');await expect(page).toHaveTitle('Old version');old=false;await page.evaluate(async()=>{await navigator.serviceWorker.register('./sw.js');await navigator.serviceWorker.ready;});await page.reload();await expect(page).toHaveTitle('Past Paper');await expect(page.getByRole('heading',{name:'加入第一份題庫',exact:true})).toBeVisible();await new Promise<void>(r=>server.close(()=>r()));await page.reload();await expect(page.getByRole('heading',{name:'加入第一份題庫',exact:true})).toBeVisible();}finally{server.close();}
+});
 test("SQ ink, undo, redo, reload, self-mark, and clean repeat", async ({
   page,
 }) => {
@@ -155,7 +162,8 @@ test("offline shell reload retains active question and local assets", async ({
   browserName,
 }) => {
   const server = createServer(async (req, res) => {
-    const path = req.url === "/" ? "index.html" : req.url!.slice(1);
+    const pathname=new URL(req.url!,'http://localhost').pathname;
+    const path = pathname === "/" ? "index.html" : pathname.slice(1);
     try {
       const data = await readFile("dist/" + path);
       res.setHeader(
